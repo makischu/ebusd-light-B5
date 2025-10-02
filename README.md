@@ -85,7 +85,7 @@ flowchart LR
 a(heatpump system) <-->|ebus|b(adapter) <-->|TCP|c(ebusd-light) <-->|MQTT|d(ebus-B5-decoder)
 ```
 
-Currently the script demonstrates passive listening only, no polling. The set of decodable values is limited and there is currently no seperate configuration at all, all hardcoded. Sufficient for demonstration or minimalistic purposes, but not production-ready.
+Currently the set of decodable values is limited and there is currently no seperate configuration at all, all hardcoded. Sufficient for demonstration or minimalistic purposes, but not production-ready.
 
 
 

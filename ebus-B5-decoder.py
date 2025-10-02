@@ -35,6 +35,7 @@ mqttIP = "192.168.2.43"
 clientStrom = mqtt.Client()     
 topicin   = "ebus/ll/rx"
 topicout  = "ebus/ll/rxd" 
+topictx   = "ebus/ll/tx" 
 q = queue.Queue() #for processing messages in main loop, not callback
 
 
@@ -181,10 +182,12 @@ def decodeTelegram(telegram):
         ADDR = tel_m[0:2]               # QQ ZZ 
         REGA = tel_m[2:4]+pay_m[0:1]    # PB SB __ ID
         ADDRnREGA = ADDR+REGA
+        ZZnREGA = ADDRnREGA[1:]
         pay_m_v = pay_m[1:]             # vaillant-payload is 1 less as first is always some index.
         
         # 71 08 | B5 1A xx 05  | xx 32 PA |  xx 08 0E AA BB xx xx xx xx xx  AA BB depends in additional parameter PA!
-        if ADDRnREGA == h2b("71 08 B5 1A 05") and len(pay_s)*3 == len("xx 08 0E EI xx xx xx xx xx xx "):
+        #if ADDRnREGA == h2b("71 08 B5 1A 05") and len(pay_s)*3 == len("xx 08 0E EI xx xx xx xx xx xx "):
+        if    ZZnREGA == h2b(   "08 B5 1A 05") and len(pay_s)*3 == len("xx 08 0E EI xx xx xx xx xx xx "):
             if len(pay_m_v) == 3:
                 if False:
                     pass
@@ -289,9 +292,14 @@ def decodeTelegram(telegram):
     
     
     
-def publish(linedict):
+def publishRxd(linedict):
     global clientStrom,topicout
     clientStrom.publish(topicout, json.dumps(linedict))
+    
+def publishTx(telegramstr):
+    global clientStrom,topictx
+    txdict = { "telegram" : telegramstr }
+    clientStrom.publish(topictx, json.dumps(txdict) )
 
 #MQTT-Callback.
 def on_message(client, userdata, message):
@@ -395,9 +403,14 @@ if __name__ == '__main__':
     # plt.show()
     
     
+    
+    
     # live translation. subscribe to ebus/ll/rxd to watch output.
     startMqtt()
+    tLastTrigger = 0
     while run:
+        tNow = time.perf_counter()
+        #Task1: translate received
         data = None
         try:
             data = q.get(False)
@@ -406,8 +419,14 @@ if __name__ == '__main__':
         if data:
            decoded = decodeTelegram(data["telegram"])
            if decoded:
-               publish(decoded)
+               publishRxd(decoded)
            q.task_done()
+        #Task2: request more.
+        if tNow-tLastTrigger > 30:
+            tLastTrigger = tNow
+            #Energieintegral
+            #ebusCRC(h2b("31 08 B5 1A 04 05 99 32 21")) 8E
+            publishTx("31 08 B5 1A 04 05 99 32 21 8E")
         time.sleep(0.1)
     stopMqtt()
     
