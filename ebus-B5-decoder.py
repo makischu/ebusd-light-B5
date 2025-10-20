@@ -181,9 +181,82 @@ def decodeTelegram(telegram):
     if tel_valid and len(pay_m)>=1:
         ADDR = tel_m[0:2]               # QQ ZZ 
         REGA = tel_m[2:4]+pay_m[0:1]    # PB SB __ ID
-        ADDRnREGA = ADDR+REGA
-        ZZnREGA = ADDRnREGA[1:]
+        ADDRnREGA = ADDR+REGA           # QQ ZZ PB SB  ID
+        ZZnREGA = ADDRnREGA[1:]         #    ZZ PB SB  ID
         pay_m_v = pay_m[1:]             # vaillant-payload is 1 less as first is always some index.
+        
+        # ADDR    REG           MDAT     SDAT
+        # # 71 08 | B5 14 xx 05  | XN 03 FF FF  |  XN 00 AA AA 
+        if    ZZnREGA == h2b(   "08 B5 14 05") and len(pay_s)*3 == len("XN 00 32 00 "):
+            if len(pay_m_v) == 4 and pay_m_v[1:4] == h2b('03 FF FF'):
+                tregid = pay_s[0:1]
+                testid = b2u(tregid)
+                val16u = b2u(pay_s[2:4])
+                val16s = b2s(pay_s[2:4])
+                if False:
+                    pass
+                elif testid == 43: #tregid == h2b('2B'):
+                    decoded["WFlowT[l/h]"] = val16u
+                elif testid == 1: 
+                    decoded["WPumpLvl[%]"] = val16u
+                elif testid == 17: 
+                    decoded["Fan1Lvl[%]"] = val16u
+                elif testid == 19: 
+                    decoded["CondHeat[on]"] = val16u
+                elif testid == 20: 
+                    decoded["4PortV[on]"] = val16u
+                elif testid == 21: 
+                    decoded["EEV[%]"] = val16u
+                elif testid == 23: 
+                    decoded["CompHeat[on]"] = val16u
+                elif testid == 40: 
+                    decoded["ForwTempT[C]"] = val16u/10
+                elif testid == 41: 
+                    decoded["RetnTempT[C]"] = val16u/10
+                elif testid == 41: 
+                    decoded["WPresT[bar]"] = val16u/10
+                elif testid == 48: 
+                    decoded["AirInTT[C]"] = val16u/10
+                elif testid == 55: 
+                    decoded["CompOutT[C]"] = val16u/10
+                elif testid == 56: 
+                    decoded["CompInT[C]"] = val16u/10
+                elif testid == 57:
+                    decoded["EEVOutT[C]"] = val16u/10
+                elif testid == 59:
+                    decoded["CondOutT[C]"] = val16u/10
+                elif testid == 63:
+                    decoded["HighPres[bar]"] = val16u/10
+                elif testid == 64:
+                    decoded["LowSPres[bar]"] = val16u/10
+                elif testid == 67:
+                    decoded["HighPresSw[ok]"] = val16u
+                elif testid == 85:
+                    decoded["EvapTemp[C]"] = val16u/10
+                elif testid == 86:
+                    decoded["CondTemp[C]"] = val16u/10
+                elif testid == 87:
+                    decoded["OverheatSet[K]"] = val16s/10
+                elif testid == 88:
+                    decoded["OverheatAct[K]"] = val16s/10
+                elif testid == 89:
+                    decoded["SubcoolSet[K]"] = val16s/10
+                elif testid == 90:
+                    decoded["SubcoolAct[K]"] = val16s/10
+                elif testid == 93:
+                    decoded["CompSpeed[rps]"] = val16u/10
+                elif testid == 123:
+                    decoded["CompOutTempSw[ok]"] = val16u
+                elif testid == 46:
+                    decoded["DigInS20[closed]"] = val16u
+                elif testid == 72:
+                    decoded["DigInS21[closed]"] = val16u
+                elif testid == 119:
+                    decoded["DigOutMA1[on]"] = val16u
+                elif testid == 125:
+                    decoded["DigInME[closed]"] = val16u
+                elif testid == 126:
+                    decoded["DigOutMA2[on]"] = val16u
         
         # 71 08 | B5 1A xx 05  | xx 32 PA |  xx 08 0E AA BB xx xx xx xx xx  AA BB depends in additional parameter PA!
         #if ADDRnREGA == h2b("71 08 B5 1A 05") and len(pay_s)*3 == len("xx 08 0E EI xx xx xx xx xx xx "):
@@ -407,7 +480,12 @@ if __name__ == '__main__':
     
     # live translation. subscribe to ebus/ll/rxd to watch output.
     startMqtt()
-    tLastTrigger = 0
+    tLastTrigger1 = 0
+    tLastTrigger30 = 0
+    tLastTrigger300 = 0
+    # requestTelegram = "31 08 B5 14 05 05 40 03 FF FF AA"
+    interest14 = [1, 17, 19, 20, 21, 23, 55, 56, 57, 59, 63, 64, 67, 85, 86, 87, 88, 89, 90, 93, 123, ]  #act like the test menu, request T.0.001 etc.
+    interestRemaining = []
     while run:
         tNow = time.perf_counter()
         #Task1: translate received
@@ -417,16 +495,26 @@ if __name__ == '__main__':
         except:
             pass
         if data:
-           decoded = decodeTelegram(data["telegram"])
-           if decoded:
-               publishRxd(decoded)
-           q.task_done()
+            decoded = decodeTelegram(data["telegram"])
+            if decoded:
+                publishRxd(decoded)
+            q.task_done()
         #Task2: request more.
-        if tNow-tLastTrigger > 30:
-            tLastTrigger = tNow
+        if tNow-tLastTrigger1 > 1:
+            tLastTrigger1 = tNow
+            if interestRemaining:
+                testOfInterest = interestRemaining.pop(0)
+                requestTelegram = "31 08 B5 14 05 05 " + testOfInterest.to_bytes(1,'big').hex() + " 03 FF FF "
+                requestTelegram = requestTelegram + ebusCRC(h2b(requestTelegram)).hex()
+                publishTx(requestTelegram)
+        elif tNow-tLastTrigger30 > 30:
+            tLastTrigger30 = tNow
             #Energieintegral
             #ebusCRC(h2b("31 08 B5 1A 04 05 99 32 21")) 8E
             publishTx("31 08 B5 1A 04 05 99 32 21 8E")
+        elif tNow-tLastTrigger300 > 300:
+            tLastTrigger300 = tNow
+            interestRemaining = interest14.copy()
         time.sleep(0.1)
     stopMqtt()
     

@@ -27,6 +27,7 @@
 // requires an ebus adapter e.g. https://adapter.ebusd.eu/v5-c6/ 
 // requires an mqtt broker[+client], e.g. mosquitto_sub -h localhost -p 1883 -t ebus/ll/rx   
 // format:                                {"telegram":"10 08 B5 10 09 00 00 3D FF FF FF 06 00 00 26 00 01 01 9A 00 AA"}
+// tx test example mosquitto_pub -h localhost -t "ebus/ll/tx" -m '{"telegram":"31 08 B5 14 05 05 40 03 FF FF AA"}'
 
 
 #include <stdio.h> //printf
@@ -132,6 +133,7 @@ enum TelegramSendState {
 };
 TelegramSendState sendState;
 
+//escape special chars
 void telegramExpand(Telegram* pIn, Telegram *pOut) {
     int i=0;
     uint8_t byte;
@@ -152,6 +154,26 @@ void telegramExpand(Telegram* pIn, Telegram *pOut) {
         else {
             pOut->data[pOut->len++] = byte;
         }
+    }
+}
+// opposite of expand. decode escaped chars.
+void telegramDeflate(Telegram* pIn, Telegram *pOut) {
+    int i=0;
+    uint8_t byte,byte2;
+    pOut->len = 0;
+    for(i=0;i<pIn->len && i+1<sizeof(pIn->data);i++) {
+        byte  = pIn->data[i];
+        byte2 = pIn->data[i+1];
+        if (byte==0xA9) {
+            if(byte2==0x01) {
+                byte = 0xAA;
+            }
+            if(byte2==0x00) {
+                byte = 0xA9;
+            }
+            i++;
+        }
+        pOut->data[pOut->len++] = byte;
     }
 }
 void telegramExpandEnhanced(Telegram* pIn, Telegram *pOut) {
@@ -274,10 +296,9 @@ static const uint8_t CRC_LOOKUP_TABLE[] = {
 
 uint8_t calcEbusCrc(uint8_t* pStart, int len) {
     uint8_t crc = 0x00;
-    uint8_t byte;
-
+    uint8_t byte=0;
     uint8_t inject=0xFF;
-    for (int i=0;i<len;i++) {
+    for (int i=0;i<len||inject!=0xFF;i++) {
         byte = pStart[i];
         // "the CRC is calculated over the EXPANDED byte transmission sequence"
         if (inject!=0xFF) {
@@ -384,12 +405,21 @@ void processBusTelegram() {
 }
 
 
-Telegram telegramTxRxd; // echo of master request + slave response.
+Telegram telegramTxRxdExpanded; // echo of master request + slave response.
+Telegram telegramTxRxd;
 int arbitration_success;
 
 // received on bus - like real uart
 void processBusChar(uint8_t value) {
     static bool escaped=false;
+    bool isSYN;
+    // if, store slave response to our master request (TX). before escape handling.
+    if (sendState >= SENDDATA) {
+        if (telegramTxRxdExpanded.len+1 < sizeof(telegramTxRxdExpanded.data)) {
+            telegramTxRxdExpanded.data[telegramTxRxdExpanded.len++] = value;
+        }
+    }
+    isSYN = (value == 0xAA); //must be evaluated before escape char handling to distinguish real SYN from data AA.
     // handle escape character
     if (value==0xA9) {
         escaped = true;
@@ -406,15 +436,9 @@ void processBusChar(uint8_t value) {
         telegramRxd.len=0;
     }
     telegramRxd.data[telegramRxd.len++] = value;
-    if (value == 0xAA) {
+    if (isSYN) {
         processBusTelegram();
         telegramRxd.len = 0;
-    }
-    // if, store slave response to our master request (TX)
-    if (sendState >= SENDDATA) {
-        if (telegramTxRxd.len+1 < sizeof(telegramTxRxd.data)) {
-            telegramTxRxd.data[telegramTxRxd.len++] = value;
-        }
     }
 }
 
@@ -481,8 +505,8 @@ bool charsPreparedTCP(char** payload, int* len) {
             chars_to_send_len = 2;  // wireshark: c8b1 ok.
             chars_to_send_valid = true;
             arbitration_success = -1;
-            memset(&telegramTxRxd,0,sizeof(telegramTxRxd));
-            telegramTxRxd.data[telegramTxRxd.len++] = telegramToSendExpanded.data[0];
+            memset(&telegramTxRxdExpanded,0,sizeof(telegramTxRxdExpanded));
+            telegramTxRxdExpanded.data[telegramTxRxdExpanded.len++] = telegramToSendExpanded.data[0];
             nextState = ARBITRATION_AWAIT;
             break;
         case ARBITRATION_AWAIT:
@@ -491,7 +515,7 @@ bool charsPreparedTCP(char** payload, int* len) {
                 // I think according to ebus standard, we should retry, but this is not implemented here (yet).
                 nextState = FINISHED;
             }else if (arbitration_success == 1) {
-                telegramTxRxd.len = 1;
+                telegramTxRxdExpanded.len = 1;
                 nextState = SENDDATA;
             }else if (difftime(tnow,tLastStateChange)>1.0) {
                 printf("arbitration adapter timeout?\n");
@@ -512,7 +536,7 @@ bool charsPreparedTCP(char** payload, int* len) {
                 telegramToSendExpandedEnhancedIndex = 2;
             }else if(telegramToSendExpandedEnhancedIndex < telegramToSendExpandedEnhanced.len) {
                 // only send once received the last one.
-                if (telegramTxRxd.len*2 >= telegramToSendExpandedEnhancedIndex) {
+                if (telegramTxRxdExpanded.len*2 >= telegramToSendExpandedEnhancedIndex) {
                     chars_to_send_bus[0] = telegramToSendExpandedEnhanced.data[telegramToSendExpandedEnhancedIndex++];
                     chars_to_send_bus[1] = telegramToSendExpandedEnhanced.data[telegramToSendExpandedEnhancedIndex++];
                     chars_to_send_len = 2;
@@ -530,8 +554,8 @@ bool charsPreparedTCP(char** payload, int* len) {
                     nextState = SENDSYN;
                 }
             }
-            else if (telegramTxRxd.len >= telegramToSend.len + 1) {
-                AK = telegramTxRxd.data[telegramToSend.len];
+            else if (telegramTxRxdExpanded.len >= telegramToSendExpanded.len + 1) {
+                AK = telegramTxRxdExpanded.data[telegramToSendExpanded.len];
                 if (AK == 0x00) { //ACK
                     nextState = AWAITRESPONSE;
                 } else if (AK == 0xFF) { //NAK
@@ -548,10 +572,10 @@ bool charsPreparedTCP(char** payload, int* len) {
             break;
         case AWAITRESPONSE:
             ZZ = telegramToSend.data[1];
-            NN = telegramTxRxd.data[telegramToSend.len+1];
+            NN = telegramTxRxdExpanded.data[telegramToSendExpanded.len+1];
             if (isMasterAddr(ZZ)) { // no content expected
                 nextState = SENDSYN;
-            } else if (telegramTxRxd.len >= telegramToSend.len+3 && NN <= 16 && telegramTxRxd.len >= telegramToSend.len+3+NN) {
+            } else if (telegramTxRxdExpanded.len >= telegramToSendExpanded.len+3 && NN <= 16 && telegramTxRxdExpanded.len >= telegramToSendExpanded.len+3+NN) {
                 nextState = SENDACK;
             } else if (difftime(tnow,tLastStateChange)>1.0) {
                 printf("response timeout.\n");
@@ -559,6 +583,7 @@ bool charsPreparedTCP(char** payload, int* len) {
             }
             break;
         case SENDACK:
+            telegramDeflate(&telegramTxRxdExpanded,&telegramTxRxd);
             slaveCRCok = telegramCRCcheck(&telegramTxRxd,true);
             if (slaveCRCok) {//00
                 chars_to_send_bus[0] = 0xC4; 
