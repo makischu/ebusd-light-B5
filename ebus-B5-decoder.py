@@ -169,6 +169,10 @@ def b2s(byts):
     res  = int.from_bytes(byts,byteorder='little',signed=True)
     return res
 
+def i2h(i):
+    #impl for single byte only so far.
+    res =  i.to_bytes(1,'big').hex()
+    return res
     
 def decodeTelegram(telegram):
     #print(telegram);
@@ -185,6 +189,40 @@ def decodeTelegram(telegram):
         ZZnREGA = ADDRnREGA[1:]         #    ZZ PB SB  ID
         pay_m_v = pay_m[1:]             # vaillant-payload is 1 less as first is always some index.
         
+        #silent mode nr slots per weekday read
+        #"31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA"
+        if    ZZnREGA == h2b(   "15 B5 55 A4") and len(pay_s)*3 == len("00 02 02 02 02 02 02 02 00 "):
+            if len(pay_m_v)*3 == len("00 04 00 01 FF FF ") and pay_m_v[0:2] == h2b('00 04') and pay_s[0:1] == h2b('00'):
+                res = ""
+                for i in range(7):
+                    res = res + "{c};".format(c=b2u(pay_s[1+i:2+i]))
+                decoded["SilentScheduleSlots"] = res
+        
+        #silent mode schedule read
+        #"31 15 B5 55 07 A5 00 04 00 01 FF FF 1E 00 07 00 15 00 18 00 FF FF 8E 00 AA"
+        if    ZZnREGA == h2b(   "15 B5 55 A5") and len(pay_s)*3 == len("00 15 00 18 00 FF FF "):
+            if len(pay_m_v)*3 == len("00 04 00 01 FF FF ") and pay_m_v[0:2] == h2b('00 04') and pay_s[0:1] == h2b('00'):
+                dow = b2u(pay_m_v[2:3])
+                slot= b2u(pay_m_v[3:4])
+                starthour = b2u(pay_s[1:2])
+                startmin  = b2u(pay_s[2:3])
+                endhour   = b2u(pay_s[3:4])
+                endmin    = b2u(pay_s[4:5])
+                decoded["SilentScheduleSlotR"] = "{d};{s};{s1};{s2};{e1};{e2}".format(d=dow,s=slot,s1=starthour,s2=startmin,e1=endhour,e2=endmin)
+        
+        #silent mode schedule write
+        #"31 15 B5 55 0C A6 00 04 00 01 02 15 00 18 00 FF FF 64 00 01 00 9B 00 AA"
+        if    ZZnREGA == h2b(   "15 B5 55 A6") and len(pay_s)*3 == len("00 "):
+            if len(pay_m_v)*3 == len("00 04 00 01 02 15 00 18 00 FF FF ") and pay_m_v[0:2] == h2b('00 04') and pay_s[0:1] == h2b('00'):
+                dow  = b2u(pay_m_v[2:3])
+                slot = b2u(pay_m_v[3:4])
+                slots= b2u(pay_m_v[4:5])
+                starthour = b2u(pay_m_v[5:6])
+                startmin  = b2u(pay_m_v[6:7])
+                endhour   = b2u(pay_m_v[7:8])
+                endmin    = b2u(pay_m_v[8:9])
+                decoded["SilentScheduleSlotW"] = "{d};{s};{n};{s1};{s2};{e1};{e2}".format(d=dow,s=slot,n=slots,s1=starthour,s2=startmin,e1=endhour,e2=endmin)
+                
         # ADDR    REG           MDAT     SDAT
         # # 71 08 | B5 14 xx 05  | XN 03 FF FF  |  XN 00 AA AA 
         if    ZZnREGA == h2b(   "08 B5 14 05") and len(pay_s)*3 == len("XN 00 32 00 "):
@@ -216,7 +254,7 @@ def decodeTelegram(telegram):
                 elif testid == 41: 
                     decoded["WPresT[bar]"] = val16u/10
                 elif testid == 48: 
-                    decoded["AirInTT[C]"] = val16u/10
+                    decoded["AirInTT[C]"] = val16s/10
                 elif testid == 55: 
                     decoded["CompOutT[C]"] = val16u/10
                 elif testid == 56: 
@@ -373,6 +411,47 @@ def publishTx(telegramstr):
     global clientStrom,topictx
     txdict = { "telegram" : telegramstr }
     clientStrom.publish(topictx, json.dumps(txdict) )
+    
+    
+def publishTelegramAddCrc(telegramStringWithoutCRC):
+    requestTelegram = telegramStringWithoutCRC.strip() + " " 
+    requestTelegram = requestTelegram + ebusCRC(h2b(requestTelegram)).hex()
+    publishTx(requestTelegram)
+    
+def publishTestRequest(testOfInterest):
+    requestTelegram = "31 08 B5 14 05 05 " + i2h(testOfInterest) + " 03 FF FF "
+    publishTelegramAddCrc(requestTelegram)
+    
+    
+def requestSilentScheduleSlotCounts():
+    requestTelegram = "31 15 B5 55 07 A4 00 04 FF FF FF FF"
+    publishTelegramAddCrc(requestTelegram)
+    
+def requestSilentScheduleSlot(dow, slot):
+    requestTelegram = "31 15 B5 55 07 A5 00 04 " + i2h(dow)+" " +i2h(slot) + " FF FF"
+    publishTelegramAddCrc(requestTelegram)
+    
+def writeSilentScheduleSlot(dow, slotindex, slotcount, hh1, mm1, hh2, mm2):
+    requestTelegram = "31 15 B5 55 0C A6 00 04 " + i2h(dow)+" " +i2h(slotindex)+" " +i2h(slotcount)+" " +i2h(hh1)+" " +i2h(mm1)+" " +i2h(hh2)+" " +i2h(mm2)+ " FF FF"
+    publishTelegramAddCrc(requestTelegram)
+    
+def writeSilentScheduleSlotsNight():
+    for i in range(0,7):
+        writeSilentScheduleSlot(i,0,2,0,0,4,30);
+        time.sleep(0.6)
+        writeSilentScheduleSlot(i,1,2,21,0,24,00);
+        time.sleep(0.6)
+        
+def writeSilentScheduleSlotsNone():
+    for i in range(0,7):
+        writeSilentScheduleSlot(i,0,0,0,0,0,0);
+        time.sleep(0.6)
+        
+def writeSilentScheduleSlotsAlways():
+    for i in range(0,7):
+        writeSilentScheduleSlot(i,0,1,0,0,24,0);
+        time.sleep(0.6)
+    
 
 #MQTT-Callback.
 def on_message(client, userdata, message):
@@ -421,7 +500,11 @@ if __name__ == '__main__':
     #               "10 08 B5 07 02 09 2A 65 00 02 1B 03 32 00 AA",
     #               "10 FE B5 08 02 09 01 A9 AA",
     #               "10 08 B5 10 09 00 00 2A FF FF FF 06 00 00 46 00 01 01 9A 00 AA",
-    #               "71 08 B5 1A 04 05 95 32 25 B1 00 0A 95 08 38 CB 01 00 00 00 00 00 B1 00 AA"
+    #               "71 08 B5 1A 04 05 95 32 25 B1 00 0A 95 08 38 CB 01 00 00 00 00 00 B1 00 AA",
+    #               "31 15 B5 55 07 A5 00 04 00 01 FF FF 1E 00 07 00 15 00 18 00 FF FF 8E 00 AA",
+    #               "31 15 B5 55 07 A5 00 04 00 00 00 00 8C 00 07 00 00 00 04 1E FF FF D7 00 AA",
+    #               "31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA",
+    #               "31 15 B5 55 0C A6 00 04 00 01 02 15 00 18 00 FF FF 64 00 01 00 9B 00 AA",
     #               ] 
     # for telegram in telegrams:
     #     dec = decodeTelegram(telegram);
@@ -480,6 +563,12 @@ if __name__ == '__main__':
     
     # live translation. subscribe to ebus/ll/rxd to watch output.
     startMqtt()
+    
+    #Fluestermodus Tests
+    #writeSilentScheduleSlotsNight()
+    #writeSilentScheduleSlotsNone()
+    #writeSilentScheduleSlotsAlways()
+    
     tLastTrigger1 = 0
     tLastTrigger30 = 0
     tLastTrigger300 = 0
@@ -504,14 +593,16 @@ if __name__ == '__main__':
             tLastTrigger1 = tNow
             if interestRemaining:
                 testOfInterest = interestRemaining.pop(0)
-                requestTelegram = "31 08 B5 14 05 05 " + testOfInterest.to_bytes(1,'big').hex() + " 03 FF FF "
-                requestTelegram = requestTelegram + ebusCRC(h2b(requestTelegram)).hex()
-                publishTx(requestTelegram)
+                publishTestRequest(testOfInterest)
         elif tNow-tLastTrigger30 > 30:
             tLastTrigger30 = tNow
             #Energieintegral
             #ebusCRC(h2b("31 08 B5 1A 04 05 99 32 21")) 8E
             publishTx("31 08 B5 1A 04 05 99 32 21 8E")
+            time.sleep(1.0)
+            #Lufteinlasstemperatur
+            testOfInterest = 48
+            publishTestRequest(testOfInterest)
         elif tNow-tLastTrigger300 > 300:
             tLastTrigger300 = tNow
             interestRemaining = interest14.copy()
