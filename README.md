@@ -56,9 +56,9 @@ flowchart LR
 a(heatpump system) <-->|ebus|b(adapter) <-->|UART over TCP/eth|c(ebusd)
 ```
 
-My adapter is an [eBUS Adapter Shield C6](https://adapter.ebusd.eu/v5-c6/) with ethernet shield, running the firmware build 20250615. Ethernet allows me to place the server within arbitrary distance to the ebus [adapter]. Drawback is a big overhead, as ebusd was originally made for local UART and in general uses a whole TCP packet for every single bus byte. At the time of writing in 2025, the adapter offers arbitration offloading, but no rx or tx buffer. However, sending whole telegrams is ["planned"](https://github.com/john30/ebusd/blob/master/docs/enhanced_proto.md).
+My adapter is an [eBUS Adapter Shield C6](https://adapter.ebusd.eu/v5-c6/) with ethernet shield, running the firmware build 20250615. Ethernet allows me to place the server within arbitrary distance to the ebus [adapter]. Drawback is a big overhead, as ebusd was originally made for local UART and in general uses a whole TCP packet for every single bus byte. At the time of writing in Sep'2025, the adapter offers arbitration offloading, but no rx or tx buffer. However, sending whole telegrams ["is ](https://github.com/john30/ebusd/blob/255f176861ac9e41ba983183ffc90333ed2ad135/docs/enhanced_proto.md) [planned"](https://github.com/john30/ebusd/blob/master/docs/enhanced_proto.md).
 
-Fun fact: As far as I can see, only ebusd's server component ist open source - the adapter firmware seems not. 
+Fun fact: As far as I can see, only ebusd's server component is open source - the adapter firmware seems not. Edit: In Nov'25 I realized a possible reason: the author introduced [micro-ebusd](https://token.ebusd.eu/) in Oct'25. It can ["send arbitrary messages from hex input" on "the adapter directly"](https://token.ebusd.eu/) and much more, if you "[purchase](https://token.ebusd.eu/) a token".
 
 As a first step, I think of a passive tap, only listening on the bus. This reduces complexity a lot in contrast to mimicing a full ebus device. There are two main tasks to accomplish:
  - translating (a stream of) UART bytes to telegrams
@@ -123,3 +123,4 @@ mosquitto_sub -h 192.168.x.y -t ebus/ll/rxd
 {"WPres[bar]": 1.2, "WFlow[l/h]": 843}
 {"ForwTemp[C]": 30.875, "WPres[bar]": 1.2, "AAAA[?]": 0, "OpMode": 8}
 ```
+
