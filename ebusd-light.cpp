@@ -408,6 +408,7 @@ void processBusTelegram() {
 Telegram telegramTxRxdExpanded; // echo of master request + slave response.
 Telegram telegramTxRxd;
 int arbitration_success;
+int arbitration_retries;
 
 // received on bus - like real uart
 void processBusChar(uint8_t value) {
@@ -491,6 +492,7 @@ bool charsPreparedTCP(char** payload, int* len) {
                 telegramExpand(&telegramToSend,&telegramToSendExpanded);
                 telegramExpandEnhanced(&telegramToSendExpanded,&telegramToSendExpandedEnhanced);
                 telegramToSendExpandedEnhancedIndex=0;
+                arbitration_retries = 0;
                 nextState = ARBITRATION_INIT;
             }
             else {
@@ -510,13 +512,18 @@ bool charsPreparedTCP(char** payload, int* len) {
             nextState = ARBITRATION_AWAIT;
             break;
         case ARBITRATION_AWAIT:
-            if (arbitration_success == 0) {
-                printf("arbitration failed.\n");
-                // I think according to ebus standard, we should retry, but this is not implemented here (yet).
-                nextState = FINISHED;
-            }else if (arbitration_success == 1) {
-                telegramTxRxdExpanded.len = 1;
-                nextState = SENDDATA;
+            if (arbitration_success == 1) {
+                    telegramTxRxdExpanded.len = 1;
+                    nextState = SENDDATA;
+            }
+            else if (arbitration_success == 0 && difftime(tnow,tLastStateChange)>0.1) {
+                printf("arbitration failed %d.\n",arbitration_retries); // and let >100ms pass before retry.
+                if (arbitration_retries < 3) {   // allow max 3 attempts (2 retries)
+                    arbitration_retries++;
+                    nextState = ARBITRATION_INIT;
+                } else {
+                    nextState = FINISHED;
+                }
             }else if (difftime(tnow,tLastStateChange)>1.0) {
                 printf("arbitration adapter timeout?\n");
                 nextState = FINISHED;
