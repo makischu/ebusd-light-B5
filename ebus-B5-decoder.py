@@ -169,9 +169,17 @@ def b2s(byts):
     res  = int.from_bytes(byts,byteorder='little',signed=True)
     return res
 
-def i2h(i):
-    #impl for single byte only so far.
-    res =  i.to_bytes(1,'big').hex()
+def i2h(intorlist):
+    if not isinstance(intorlist, list):
+        intorlist = [intorlist]
+    res = ''
+    for i in intorlist:
+        res = res + i.to_bytes(1,'little').hex() + ' '
+    res = res[0:-1]
+    return res
+
+def u16_2h(i):
+    res=int(i).to_bytes(2,'little').hex(' ')
     return res
     
 def decodeTelegram(telegram):
@@ -189,31 +197,38 @@ def decodeTelegram(telegram):
         ZZnREGA = ADDRnREGA[1:]         #    ZZ PB SB  ID
         pay_m_v = pay_m[1:]             # vaillant-payload is 1 less as first is always some index.
         
-        #silent mode nr slots per weekday read
+        #nr slots per weekday schedule read
         #"31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA"
         if    ZZnREGA == h2b(   "15 B5 55 A4") and len(pay_s)*3 == len("00 02 02 02 02 02 02 02 00 "):
-            if len(pay_m_v)*3 == len("00 04 00 01 FF FF ") and pay_m_v[0:2] == h2b('00 04') and pay_s[0:1] == h2b('00'):
+            if len(pay_m_v)*3 == len("00 04 00 01 FF FF ") and pay_s[0:1] == h2b('00'):
                 res = ""
                 for i in range(7):
                     res = res + "{c};".format(c=b2u(pay_s[1+i:2+i]))
-                decoded["SilentScheduleSlots"] = res
+                if pay_m_v[0:2] == h2b('00 04'):
+                    decoded["SilentScheduleSlots"] = res
+                if pay_m_v[0:2] == h2b('00 00'):
+                    decoded["HeatingScheduleSlots"] = res
         
-        #silent mode schedule read
+        # schedule read
         #"31 15 B5 55 07 A5 00 04 00 01 FF FF 1E 00 07 00 15 00 18 00 FF FF 8E 00 AA"
         if    ZZnREGA == h2b(   "15 B5 55 A5") and len(pay_s)*3 == len("00 15 00 18 00 FF FF "):
-            if len(pay_m_v)*3 == len("00 04 00 01 FF FF ") and pay_m_v[0:2] == h2b('00 04') and pay_s[0:1] == h2b('00'):
+            if len(pay_m_v)*3 == len("00 04 00 01 FF FF ") and pay_s[0:1] == h2b('00'):
                 dow = b2u(pay_m_v[2:3])
                 slot= b2u(pay_m_v[3:4])
                 starthour = b2u(pay_s[1:2])
                 startmin  = b2u(pay_s[2:3])
                 endhour   = b2u(pay_s[3:4])
                 endmin    = b2u(pay_s[4:5])
-                decoded["SilentScheduleSlotR"] = "{d};{s};{s1};{s2};{e1};{e2}".format(d=dow,s=slot,s1=starthour,s2=startmin,e1=endhour,e2=endmin)
+                if pay_m_v[0:2] == h2b('00 04'):
+                    decoded["SilentScheduleSlotR"] = "{d};{s};{s1};{s2};{e1};{e2}".format(d=dow,s=slot,s1=starthour,s2=startmin,e1=endhour,e2=endmin)
+                if pay_m_v[0:2] == h2b('00 00'):
+                    rtemp     = b2u(pay_s[5:7])/10
+                    decoded["HeatingScheduleSlotR"] = "{d};{s};{s1};{s2};{e1};{e2};{t}".format(d=dow,s=slot,s1=starthour,s2=startmin,e1=endhour,e2=endmin,t=rtemp)
         
-        #silent mode schedule write
+        # schedule write
         #"31 15 B5 55 0C A6 00 04 00 01 02 15 00 18 00 FF FF 64 00 01 00 9B 00 AA"
         if    ZZnREGA == h2b(   "15 B5 55 A6") and len(pay_s)*3 == len("00 "):
-            if len(pay_m_v)*3 == len("00 04 00 01 02 15 00 18 00 FF FF ") and pay_m_v[0:2] == h2b('00 04') and pay_s[0:1] == h2b('00'):
+            if len(pay_m_v)*3 == len("00 04 00 01 02 15 00 18 00 FF FF ")  and pay_s[0:1] == h2b('00'):
                 dow  = b2u(pay_m_v[2:3])
                 slot = b2u(pay_m_v[3:4])
                 slots= b2u(pay_m_v[4:5])
@@ -221,7 +236,11 @@ def decodeTelegram(telegram):
                 startmin  = b2u(pay_m_v[6:7])
                 endhour   = b2u(pay_m_v[7:8])
                 endmin    = b2u(pay_m_v[8:9])
-                decoded["SilentScheduleSlotW"] = "{d};{s};{n};{s1};{s2};{e1};{e2}".format(d=dow,s=slot,n=slots,s1=starthour,s2=startmin,e1=endhour,e2=endmin)
+                if pay_m_v[0:2] == h2b('00 04'):
+                    decoded["SilentScheduleSlotW"] = "{d};{s};{n};{s1};{s2};{e1};{e2}".format(d=dow,s=slot,n=slots,s1=starthour,s2=startmin,e1=endhour,e2=endmin)
+                if pay_m_v[0:2] == h2b('00 00'):
+                    wtemp     = b2u(pay_m_v[9:11])/10
+                    decoded["HeatingScheduleSlotW"] = "{d};{s};{n};{s1};{s2};{e1};{e2};{t}".format(d=dow,s=slot,n=slots,s1=starthour,s2=startmin,e1=endhour,e2=endmin,t=wtemp)
                 
         # ADDR    REG           MDAT     SDAT
         # # 71 08 | B5 14 xx 05  | XN 03 FF FF  |  XN 00 AA AA 
@@ -411,6 +430,7 @@ def publishTx(telegramstr):
     global clientStrom,topictx
     txdict = { "telegram" : telegramstr }
     clientStrom.publish(topictx, json.dumps(txdict) )
+    time.sleep(0.5) #dumb rate limiting
     
     
 def publishTelegramAddCrc(telegramStringWithoutCRC):
@@ -422,35 +442,48 @@ def publishTestRequest(testOfInterest):
     requestTelegram = "31 08 B5 14 05 05 " + i2h(testOfInterest) + " 03 FF FF "
     publishTelegramAddCrc(requestTelegram)
     
-    
-def requestSilentScheduleSlotCounts():
-    requestTelegram = "31 15 B5 55 07 A4 00 04 FF FF FF FF"
+#kind: 4=silent, 0=heating, 3=circpump, 2=ww
+def requestScheduleSlotCounts(kind):
+    requestTelegram = "31 15 B5 55 07 A4 00 " + i2h(kind)+ " FF FF FF FF"
     publishTelegramAddCrc(requestTelegram)
     
-def requestSilentScheduleSlot(dow, slot):
-    requestTelegram = "31 15 B5 55 07 A5 00 04 " + i2h(dow)+" " +i2h(slot) + " FF FF"
+def requestScheduleSlot(kind, dow, slot):
+    requestTelegram = "31 15 B5 55 07 A5 00 " + i2h([kind,dow,slot]) + " FF FF"
     publishTelegramAddCrc(requestTelegram)
     
-def writeSilentScheduleSlot(dow, slotindex, slotcount, hh1, mm1, hh2, mm2):
-    requestTelegram = "31 15 B5 55 0C A6 00 04 " + i2h(dow)+" " +i2h(slotindex)+" " +i2h(slotcount)+" " +i2h(hh1)+" " +i2h(mm1)+" " +i2h(hh2)+" " +i2h(mm2)+ " FF FF"
+def writeScheduleSlot(kind, dow, slotindex, slotcount, hh1, mm1, hh2, mm2, temp=None):
+    tempstr = "FF FF" if temp is None else u16_2h(temp*10)
+    requestTelegram = "31 15 B5 55 0C A6 00 " + i2h([kind, dow,slotindex,slotcount,hh1,mm1,hh2,mm2])+ " " + tempstr
     publishTelegramAddCrc(requestTelegram)
+    
     
 def writeSilentScheduleSlotsNight():
     for i in range(0,7):
-        writeSilentScheduleSlot(i,0,2,0,0,4,30);
-        time.sleep(0.6)
-        writeSilentScheduleSlot(i,1,2,21,0,24,00);
-        time.sleep(0.6)
+        writeScheduleSlot(4,i,0,2,0,0,4,30);
+        writeScheduleSlot(4,i,1,2,21,0,24,00);
         
 def writeSilentScheduleSlotsNone():
     for i in range(0,7):
-        writeSilentScheduleSlot(i,0,0,0,0,0,0);
-        time.sleep(0.6)
+        writeScheduleSlot(4,i,0,0,0,0,0,0);
         
 def writeSilentScheduleSlotsAlways():
     for i in range(0,7):
-        writeSilentScheduleSlot(i,0,1,0,0,24,0);
-        time.sleep(0.6)
+        writeScheduleSlot(4,i,0,1,0,0,24,0);
+        
+        
+def writeHeatingSlots():
+    for dow in range(0,5):
+        writeScheduleSlot(0,dow,0,5, 3,00, 4,00,20.0);
+        writeScheduleSlot(0,dow,1,5, 4,00, 7,30,21.0);
+        writeScheduleSlot(0,dow,2,5, 7,30,10,30,20.0 if dow != 1 else 21.0);
+        writeScheduleSlot(0,dow,3,5,10,30,21,00,21.0);
+        writeScheduleSlot(0,dow,4,5,21,00,22,00,20.0);
+    writeScheduleSlot(0,5,0,3,5,0,6,0,20.0);
+    writeScheduleSlot(0,5,1,3,6,0,22,30,21.0);
+    writeScheduleSlot(0,5,2,3,22,30,23,30,20.0);
+    writeScheduleSlot(0,6,0,3,5,0,6,0,20.0);
+    writeScheduleSlot(0,6,1,3,6,0,21,0,21.0);
+    writeScheduleSlot(0,6,2,3,21,0,22,0,20.0);
     
 
 #MQTT-Callback.
@@ -505,6 +538,8 @@ if __name__ == '__main__':
     #               "31 15 B5 55 07 A5 00 04 00 00 00 00 8C 00 07 00 00 00 04 1E FF FF D7 00 AA",
     #               "31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA",
     #               "31 15 B5 55 0C A6 00 04 00 01 02 15 00 18 00 FF FF 64 00 01 00 9B 00 AA",
+    #               "31 15 B5 55 07 A5 00 00 00 00 FF FF 99 00 07 00 04 00 16 00 D2 00 94 00 AA",
+    #               "31 15 B5 55 0C A6 00 00 00 00 02 04 00 15 00 D2 00 39 00 01 00 9B 00 AA"
     #               ] 
     # for telegram in telegrams:
     #     dec = decodeTelegram(telegram);
@@ -561,6 +596,7 @@ if __name__ == '__main__':
     
     
     
+    
     # live translation. subscribe to ebus/ll/rxd to watch output.
     startMqtt()
     
@@ -568,6 +604,9 @@ if __name__ == '__main__':
     #writeSilentScheduleSlotsNight()
     #writeSilentScheduleSlotsNone()
     #writeSilentScheduleSlotsAlways()
+    
+    #Heizzeiten setzen
+    #writeHeatingSlots()
     
     tLastTrigger1 = 0
     tLastTrigger30 = 0
