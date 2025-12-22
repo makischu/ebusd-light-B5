@@ -32,7 +32,6 @@ from datetime import datetime
 
 
 mqttIP = "192.168.2.43"
-clientStrom = mqtt.Client()     
 topicin   = "ebus/ll/rx"
 topicout  = "ebus/ll/rxd" 
 topictx   = "ebus/ll/tx" 
@@ -267,21 +266,21 @@ def decodeTelegram(telegram):
                 elif testid == 23: 
                     decoded["CompHeat[on]"] = val16u
                 elif testid == 40: 
-                    decoded["ForwTempT[C]"] = val16u/10
+                    decoded["ForwTempT[C]"] = val16s/10
                 elif testid == 41: 
-                    decoded["RetnTempT[C]"] = val16u/10
+                    decoded["RetnTempT[C]"] = val16s/10
                 elif testid == 41: 
                     decoded["WPresT[bar]"] = val16u/10
                 elif testid == 48: 
                     decoded["AirInTT[C]"] = val16s/10
                 elif testid == 55: 
-                    decoded["CompOutT[C]"] = val16u/10
+                    decoded["CompOutT[C]"] = val16s/10
                 elif testid == 56: 
-                    decoded["CompInT[C]"] = val16u/10
+                    decoded["CompInT[C]"] = val16s/10
                 elif testid == 57:
-                    decoded["EEVOutT[C]"] = val16u/10
+                    decoded["EEVOutT[C]"] = val16s/10
                 elif testid == 59:
-                    decoded["CondOutT[C]"] = val16u/10
+                    decoded["CondOutT[C]"] = val16s/10
                 elif testid == 63:
                     decoded["HighPres[bar]"] = val16u/10
                 elif testid == 64:
@@ -289,9 +288,9 @@ def decodeTelegram(telegram):
                 elif testid == 67:
                     decoded["HighPresSw[ok]"] = val16u
                 elif testid == 85:
-                    decoded["EvapTemp[C]"] = val16u/10
+                    decoded["EvapTemp[C]"] = val16s/10
                 elif testid == 86:
-                    decoded["CondTemp[C]"] = val16u/10
+                    decoded["CondTemp[C]"] = val16s/10
                 elif testid == 87:
                     decoded["OverheatSet[K]"] = val16s/10
                 elif testid == 88:
@@ -478,12 +477,12 @@ def writeHeatingSlots():
         writeScheduleSlot(0,dow,2,5, 7,30,10,30,20.0 if dow != 1 else 21.0);
         writeScheduleSlot(0,dow,3,5,10,30,21,00,21.0);
         writeScheduleSlot(0,dow,4,5,21,00,22,00,20.0);
-    writeScheduleSlot(0,5,0,3,5,0,6,0,20.0);
-    writeScheduleSlot(0,5,1,3,6,0,22,30,21.0);
+    writeScheduleSlot(0,5,0,3, 4,30, 5,30,20.0);
+    writeScheduleSlot(0,5,1,3, 5,30,22,30,21.0);
     writeScheduleSlot(0,5,2,3,22,30,23,30,20.0);
-    writeScheduleSlot(0,6,0,3,5,0,6,0,20.0);
-    writeScheduleSlot(0,6,1,3,6,0,21,0,21.0);
-    writeScheduleSlot(0,6,2,3,21,0,22,0,20.0);
+    writeScheduleSlot(0,6,0,3, 4,30, 5,30,20.0);
+    writeScheduleSlot(0,6,1,3, 5,30,21,00,21.0);
+    writeScheduleSlot(0,6,2,3,21,00,22,00,20.0);
     
 
 #MQTT-Callback.
@@ -598,6 +597,7 @@ if __name__ == '__main__':
     
     
     # live translation. subscribe to ebus/ll/rxd to watch output.
+    clientStrom = mqtt.Client()  
     startMqtt()
     
     #Fluestermodus Tests
