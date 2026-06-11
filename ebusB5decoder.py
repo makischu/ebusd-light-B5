@@ -472,16 +472,17 @@ def writeSilentScheduleSlotsAlways():
         
 def writeHeatingSlots():
     for dow in range(0,5):
-        writeScheduleSlot(0,dow,0,5, 3,00, 4,00,20.0);
-        writeScheduleSlot(0,dow,1,5, 4,00, 7,30,21.0);
-        writeScheduleSlot(0,dow,2,5, 7,30,10,30,20.0 if dow != 1 else 21.0);
-        writeScheduleSlot(0,dow,3,5,10,30,21,00,21.0);
-        writeScheduleSlot(0,dow,4,5,21,00,22,00,20.0);
-    writeScheduleSlot(0,5,0,3, 4,30, 5,30,20.0);
-    writeScheduleSlot(0,5,1,3, 5,30,22,30,21.0);
-    writeScheduleSlot(0,5,2,3,22,30,23,30,20.0);
-    writeScheduleSlot(0,6,0,3, 4,30, 5,30,20.0);
-    writeScheduleSlot(0,6,1,3, 5,30,21,00,21.0);
+        writeScheduleSlot(0,dow,0,6, 1,30, 3,00,20.5);
+        writeScheduleSlot(0,dow,1,6, 3,00, 7,30,21.5);
+        writeScheduleSlot(0,dow,2,6, 7,30,10,30,20.5 if dow != 1 else 21.0);
+        writeScheduleSlot(0,dow,3,6,10,30,13,00,21.0);
+        writeScheduleSlot(0,dow,4,6,13,00,20,30,21.5);
+        writeScheduleSlot(0,dow,5,6,20,30,22,00,20.0);
+    writeScheduleSlot(0,5,0,3, 3,00, 5,00,20.0);
+    writeScheduleSlot(0,5,1,3, 5,00,22,00,21.0);
+    writeScheduleSlot(0,5,2,3,22,00,23,00,20.0);
+    writeScheduleSlot(0,6,0,3, 3,00, 5,00,20.0);
+    writeScheduleSlot(0,6,1,3, 5,00,21,00,21.0);
     writeScheduleSlot(0,6,2,3,21,00,22,00,20.0);
     
 
