@@ -35,6 +35,7 @@ mqttIP = "192.168.2.43"
 topicin   = "ebus/ll/rx"
 topicout  = "ebus/ll/rxd" 
 topictx   = "ebus/ll/tx" 
+topiccmd  = "ebus/ll/txc"
 q = queue.Queue() #for processing messages in main loop, not callback
 
 
@@ -159,7 +160,7 @@ def h2b(hex_str):
    return res
 
 def b2u(byts): 
-    #todo handle lower and upper bound values
+    #todo handle lower and upper bound values (FF? oder was meinte ich damit?)
     res  = int.from_bytes(byts,byteorder='little',signed=False)
     return res
 
@@ -195,6 +196,14 @@ def decodeTelegram(telegram):
         ADDRnREGA = ADDR+REGA           # QQ ZZ PB SB  ID
         ZZnREGA = ADDRnREGA[1:]         #    ZZ PB SB  ID
         pay_m_v = pay_m[1:]             # vaillant-payload is 1 less as first is always some index.
+        
+        #Leistungsbegrenzung
+        #f108b53103012c01 / 0101  300    *10 = 3000W
+        #f108b5310301ffff / 0101  ----   AUS
+        if    ZZnREGA == h2b(   "08 B5 31 01") and len(pay_s)*3 == len("01 "):
+            if len(pay_m_v)*3 == len("2c 01 "):
+                res = b2u(pay_m_v[0:2]) * 10 if pay_m_v[0:2] != h2b('FF FF ') else "-"
+                decoded["HpElPwrLim[W]"] = res
         
         #nr slots per weekday schedule read
         #"31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA"
@@ -485,27 +494,49 @@ def writeHeatingSlots():
     writeScheduleSlot(0,6,1,3, 5,00,21,00,21.0);
     writeScheduleSlot(0,6,2,3,21,00,22,00,20.0);
     
+def writeElectricalPowerLimit(Pmax_hp_W):
+    # see https://github.com/cyberthom42/vaillant-arotherm-plus/discussions/20#discussioncomment-16821026
+    # f108b53103012c01 / 0101
+    enc = int(Pmax_hp_W/10) if Pmax_hp_W is not None and Pmax_hp_W > 0 else 65535
+    requestTelegram = "31 08 B5 31 03 01 " + u16_2h(enc)+ " "
+    publishTelegramAddCrc(requestTelegram)
+    
+# "de"coder in die andere Richtung. uebersetze ausgewaehlte kommandos nach ebus.
+def workCMD(data):
+    #{'CMD': 'PWRLIM', 'VALUE': '1000'}
+    try:
+        if 'CMD' in data:
+            if data['CMD'] == 'PWRLIM':
+                limit = int(data['VALUE']) if 'VALUE' in data else -1
+                writeElectricalPowerLimit(limit)
+    except:
+        pass
 
 #MQTT-Callback.
 def on_message(client, userdata, message):
+    global topicin, topiccmd
     try:
+        topicstr   = message.topic
         messagestr = str(message.payload.decode())
         #print(messagestr) 
         #{"telegram":"10 08 B5 11 01 01 89 00 09 3A 3A 00 80 FF FF 00 00 FF 49 00 AA"}
         data = json.loads(messagestr)
-        if "telegram" in data:
+        if topicstr == topicin and "telegram" in data:
+            q.put(data)
+        if topicstr == topiccmd and "CMD" in data:
             q.put(data)
     except:
         print("on_message failed to parse. ignore and continue.")
         
 
 def startMqtt():
-    global clientStrom, topicin
+    global clientStrom, topicin, topiccmd
     logging.info('Starting mqtt...')
     clientStrom.on_message = on_message;
     clientStrom.connect(mqttIP, 1883, 60)
     clientStrom.loop_start()
     clientStrom.subscribe(topicin)
+    clientStrom.subscribe(topiccmd)
     
 def stopMqtt():
     global clientStrom
@@ -520,26 +551,28 @@ if __name__ == '__main__':
     # commented code is for development / reverse engineering.
     
     # # hand-chosen telegrams.
-    # telegrams = ["71 08 B5 1A 04 05 F7 32 3D 32 00 0A F7 08 2C 4D 00 00 00 00 00 00 4C 00 AA",
-    #               "71 08 B5 1A 04 05 11 32 3C DF 00 0A 11 08 0E B1 04 00 00 00 00 00 68 00 AA",
-    #               "03 76 B5 12 06 13 00 0C 4D 03 00 C2 00 02 00 FF D3 00 AA",
-    #               "71 08 B5 11 01 07 B4 00 0A 00 BA 00 E1 08 24 00 00 00 00 C9 00 AA",
-    #               "10 76 B5 11 01 01 16 00 09 FF FF 70 0D FF FF 00 00 FF C5 00 AA",
-    #               "10 08 B5 11 01 01 89 00 09 2C 2D 00 80 FF FF 00 00 FF CF 00 AA",
-    #               "10 08 B5 11 01 00 88 00 09 65 01 0C 00 00 08 00 00 00 F9 00 AA"
-    #               "10 76 B5 04 01 00 A2 00 0A 03 52 00 00 18 09 04 25 70 0D AE 00 AA",
-    #               "10 76 B5 04 01 00 A2 00 0A 03 26 12 03 19 09 05 25 A0 0B 96 00 AA"
-    #               "10 08 B5 07 02 09 2A 65 00 02 1B 03 32 00 AA",
-    #               "10 08 B5 07 02 09 2A 65 00 02 1B 03 32 00 AA",
-    #               "10 FE B5 08 02 09 01 A9 AA",
-    #               "10 08 B5 10 09 00 00 2A FF FF FF 06 00 00 46 00 01 01 9A 00 AA",
-    #               "71 08 B5 1A 04 05 95 32 25 B1 00 0A 95 08 38 CB 01 00 00 00 00 00 B1 00 AA",
-    #               "31 15 B5 55 07 A5 00 04 00 01 FF FF 1E 00 07 00 15 00 18 00 FF FF 8E 00 AA",
-    #               "31 15 B5 55 07 A5 00 04 00 00 00 00 8C 00 07 00 00 00 04 1E FF FF D7 00 AA",
-    #               "31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA",
-    #               "31 15 B5 55 0C A6 00 04 00 01 02 15 00 18 00 FF FF 64 00 01 00 9B 00 AA",
-    #               "31 15 B5 55 07 A5 00 00 00 00 FF FF 99 00 07 00 04 00 16 00 D2 00 94 00 AA",
-    #               "31 15 B5 55 0C A6 00 00 00 00 02 04 00 15 00 D2 00 39 00 01 00 9B 00 AA"
+    # telegrams = [
+    #                "71 08 B5 1A 04 05 F7 32 3D 32 00 0A F7 08 2C 4D 00 00 00 00 00 00 4C 00 AA",
+    #                "71 08 B5 1A 04 05 11 32 3C DF 00 0A 11 08 0E B1 04 00 00 00 00 00 68 00 AA",
+    #                "03 76 B5 12 06 13 00 0C 4D 03 00 C2 00 02 00 FF D3 00 AA",
+    #                "71 08 B5 11 01 07 B4 00 0A 00 BA 00 E1 08 24 00 00 00 00 C9 00 AA",
+    #                "10 76 B5 11 01 01 16 00 09 FF FF 70 0D FF FF 00 00 FF C5 00 AA",
+    #                "10 08 B5 11 01 01 89 00 09 2C 2D 00 80 FF FF 00 00 FF CF 00 AA",
+    #                "10 08 B5 11 01 00 88 00 09 65 01 0C 00 00 08 00 00 00 F9 00 AA"
+    #                "10 76 B5 04 01 00 A2 00 0A 03 52 00 00 18 09 04 25 70 0D AE 00 AA",
+    #                "10 76 B5 04 01 00 A2 00 0A 03 26 12 03 19 09 05 25 A0 0B 96 00 AA"
+    #                "10 08 B5 07 02 09 2A 65 00 02 1B 03 32 00 AA",
+    #                "10 08 B5 07 02 09 2A 65 00 02 1B 03 32 00 AA",
+    #                "10 FE B5 08 02 09 01 A9 AA",
+    #                "10 08 B5 10 09 00 00 2A FF FF FF 06 00 00 46 00 01 01 9A 00 AA",
+    #                "71 08 B5 1A 04 05 95 32 25 B1 00 0A 95 08 38 CB 01 00 00 00 00 00 B1 00 AA",
+    #                "31 15 B5 55 07 A5 00 04 00 01 FF FF 1E 00 07 00 15 00 18 00 FF FF 8E 00 AA",
+    #                "31 15 B5 55 07 A5 00 04 00 00 00 00 8C 00 07 00 00 00 04 1E FF FF D7 00 AA",
+    #                "31 15 B5 55 07 A4 00 04 FF FF FF FF 82 00 09 00 02 02 02 02 02 02 02 00 23 00 AA",
+    #                "31 15 B5 55 0C A6 00 04 00 01 02 15 00 18 00 FF FF 64 00 01 00 9B 00 AA",
+    #                "31 15 B5 55 07 A5 00 00 00 00 FF FF 99 00 07 00 04 00 16 00 D2 00 94 00 AA",
+    #                "31 15 B5 55 0C A6 00 00 00 00 02 04 00 15 00 D2 00 39 00 01 00 9B 00 AA",
+    #               "31 08 B5 31 03 01 50 00 16 00 01 01 9A 00 AA",
     #               ] 
     # for telegram in telegrams:
     #     dec = decodeTelegram(telegram);
@@ -609,6 +642,9 @@ if __name__ == '__main__':
     #Heizzeiten setzen
     #writeHeatingSlots()
     
+    #Leistungsbegrenzung
+    #writeElectricalPowerLimit(1000)
+    
     tLastTrigger1 = 0
     tLastTrigger30 = 0
     tLastTrigger300 = 0
@@ -617,16 +653,19 @@ if __name__ == '__main__':
     interestRemaining = []
     while run:
         tNow = time.perf_counter()
-        #Task1: translate received
+        #Task1: translate received telegrams  or  received commands
         data = None
         try:
             data = q.get(False)
         except:
             pass
         if data:
-            decoded = decodeTelegram(data["telegram"])
-            if decoded:
-                publishRxd(decoded)
+            if "telegram" in data:
+                decoded = decodeTelegram(data["telegram"])
+                if decoded:
+                    publishRxd(decoded)
+            if "CMD" in data:
+                workCMD(data)
             q.task_done()
         #Task2: request more.
         if tNow-tLastTrigger1 > 1:
